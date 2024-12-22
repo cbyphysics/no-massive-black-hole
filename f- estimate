@@ -1,0 +1,136 @@
+# to estimate f=\omega(PBH)/\omega(DM)
+import numpy as np
+from scipy.optimize import minimize
+from scipy.integrate import quad
+
+class PBHCalculator:
+    def __init__(self, N_obs, t_E_obs, N_S, delta_t, epsilon, dGamma_dtE_models):
+        """
+        Initialize the PBHCalculator.
+
+        Parameters:
+        - N_obs: int, number of observed microlensing events.
+        - t_E_obs: array, Einstein timescales of observed events.
+        - N_S: int, number of microlensing source stars.
+        - delta_t: float, observation duration.
+        - epsilon: function, detection efficiency as a function of t_E.
+        - dGamma_dtE_models: dict, models for dGamma/dtE contributions.
+          Keys: 'MW_halo', 'LMC_halo', 'MW_disk', 'LMC'.
+        """
+        self.N_obs = N_obs
+        self.t_E_obs = t_E_obs
+        self.N_S = N_S
+        self.delta_t = delta_t
+        self.epsilon = epsilon
+        self.dGamma_dtE_models = dGamma_dtE_models
+
+    def dGamma_dtE(self, t_E, f, M):
+        """
+        Compute the total differential event rate dGamma/dtE.
+
+        Parameters:
+        - t_E: float, Einstein timescale.
+        - f: float, PBH dark matter fraction.
+        - M: float, PBH mass.
+
+        Returns:
+        - float, total event rate at t_E.
+        """
+        return (
+            f * self.dGamma_dtE_models['MW_halo'](t_E, M) +
+            f * self.dGamma_dtE_models['LMC_halo'](t_E, M) +
+            self.dGamma_dtE_models['MW_disk'](t_E) +
+            self.dGamma_dtE_models['LMC'](t_E)
+        )
+
+    def N_exp(self, f, M):
+        """
+        Compute the expected number of events N_exp.
+
+        Parameters:
+        - f: float, PBH dark matter fraction.
+        - M: float, PBH mass.
+
+        Returns:
+        - float, expected number of events.
+        """
+        integrand = lambda t_E: self.dGamma_dtE(t_E, f, M) * self.epsilon(t_E)
+        integral, _ = quad(integrand, 0, np.inf)
+        return self.N_S * self.delta_t * integral
+
+    def log_likelihood(self, f, M):
+        """
+        Compute the log-likelihood function.
+
+        Parameters:
+        - f: float, PBH dark matter fraction.
+        - M: float, PBH mass.
+
+        Returns:
+        - float, log-likelihood value.
+        """
+        N_exp = self.N_exp(f, M)
+        log_L = -N_exp
+
+        for t_E in self.t_E_obs:
+            dGamma = self.dGamma_dtE(t_E, f, M)
+            log_L += np.log(self.N_S * self.delta_t * dGamma * self.epsilon(t_E))
+
+        return log_L
+
+    def estimate_f(self, M, f_initial=0.1):
+        """
+        Estimate the PBH dark matter fraction f using maximum likelihood.
+
+        Parameters:
+        - M: float, PBH mass.
+        - f_initial: float, initial guess for f.
+
+        Returns:
+        - float, estimated value of f.
+        """
+        result = minimize(
+            lambda f: -self.log_likelihood(f[0], M),  # Minimize the negative log-likelihood
+            x0=[f_initial],
+            bounds=[(0, 1)]  # f must be between 0 and 1
+        )
+        return result.x[0]
+
+
+if __name__ == "__main__":
+    # Mock data for demonstration purposes
+    N_obs = 13  # Number of observed events
+    t_E_obs = np.random.uniform(10, 50, N_obs)  # Random Einstein timescales
+    N_S = 1e7  # Number of microlensing source stars
+    delta_t = 365 * 20  # Observation duration (20 years in days)
+
+   
+    def epsilon(t_E):
+        return np.exp(-t_E / 50)  # Example efficiency decreasing with t_E
+
+    def MW_halo(t_E, M):
+        return np.exp(-t_E / 30) / M  # Example model
+
+    def LMC_halo(t_E, M):
+        return np.exp(-t_E / 40) / M
+
+    def MW_disk(t_E):
+        return np.exp(-t_E / 50)
+
+    def LMC(t_E):
+        return np.exp(-t_E / 60)
+
+    dGamma_dtE_models = {
+        'MW_halo': MW_halo,
+        'LMC_halo': LMC_halo,
+        'MW_disk': MW_disk,
+        'LMC': LMC
+    }
+
+    # Initialize the calculator
+    calculator = PBHCalculator(N_obs, t_E_obs, N_S, delta_t, epsilon, dGamma_dtE_models)
+
+    # Estimate f for a given PBH mass
+    M = 10  # Example PBH mass
+    f_estimated = calculator.estimate_f(M)
+    print(f"Estimated f: {f_estimated}")
