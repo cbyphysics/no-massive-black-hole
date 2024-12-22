@@ -1,0 +1,75 @@
+import numpy as np
+from scipy.optimize import curve_fit
+import tensorflow as tf
+from tensorflow.keras import layers, models
+
+def microlensing_model(t, t0, tE, u0, F_base):
+    u = np.sqrt(u0**2 + ((t - t0) / tE)**2)
+    A = (u**2 + 2) / (u * np.sqrt(u**2 + 4))
+    return F_base * A
+
+def find_flat_portion(time, flux, window_size=10, std_threshold=0.01):
+    flat_indices = []
+    for i in range(len(flux) - window_size):
+        window_flux = flux[i:i + window_size]
+        if np.std(window_flux) < std_threshold:
+            flat_indices.append(i + window_size // 2)
+    return flat_indices
+
+def detect_magnified_points(time, flux, flat_flux_mean, amplification_threshold=1.1):
+    magnified_indices = []
+    for i, F in enumerate(flux):
+        if F / flat_flux_mean >= amplification_threshold:
+            magnified_indices.append(i)
+    return magnified_indices
+
+
+def detect_microlensing_event(time, flux, flux_error):
+    flat_indices = find_flat_portion(time, flux)
+    if not flat_indices:
+        return None  
+
+    flat_flux_mean = np.mean(flux[flat_indices])
+
+    magnified_indices = detect_magnified_points(time, flux, flat_flux_mean)
+    if not magnified_indices:
+        return None  
+    try:
+        popt, _ = curve_fit(
+            microlensing_model,
+            time[magnified_indices],
+            flux[magnified_indices],
+            sigma=flux_error[magnified_indices],
+            p0=[np.mean(time[magnified_indices]), 30, 0.1, flat_flux_mean]
+        )
+    except RuntimeError:
+        return None 
+
+    t0, tE, u0, F_base = popt
+    model_flux = microlensing_model(time, t0, tE, u0, F_base)
+    chi2 = np.sum(((flux - model_flux) / flux_error)**2)
+
+    return {
+        "t0": t0,
+        "tE": tE,
+        "u0": u0,
+        "F_base": F_base,
+        "chi2": chi2
+    }
+
+#   example
+time = np.linspace(0, 100, 1000) 
+flux = 1 + 0.1 * np.random.randn(1000)  
+flux[450:550] += 0.5 
+flux_error = 0.05 * np.ones_like(flux)
+
+
+result = detect_microlensing_event(time, flux, flux_error)
+if result:
+    print("Microlensing event detected:")
+    print(result)
+else:
+    print("No microlensing event detected.")
+
+
+#     compare with neural network
