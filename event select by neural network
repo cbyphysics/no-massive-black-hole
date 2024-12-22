@@ -1,0 +1,101 @@
+import tensorflow as tf
+import numpy as np
+
+class MicrolensingDetection:
+    def __init__(self, n_features):
+        self.n = n_features  
+
+    def create_complex_model(
+        self,
+        init_value: float = 0.0,
+        max_value: float = 1.0,
+        min_value: float = 0,
+        d: list = [1, 1, 1, 1],
+    ) -> tf.keras.Model:
+        """
+        Create a neural network model for microlensing detection and parameter prediction.
+        """
+        # Input layer
+        inputs = tf.keras.layers.Input(shape=[self.n])
+        
+        # Dense layers
+        x = tf.keras.layers.Dense(d[0] * self.n, activation="relu")(inputs)
+        x = tf.keras.layers.Dense(d[1] * self.n, activation="relu")(x)
+
+        # Log-likelihood output (classification task)
+        lnr = tf.keras.layers.Dense(d[2] * self.n, activation="relu")(x)
+        lnr = tf.keras.layers.Dense(d[2] * self.n, activation=None)(lnr)
+        lnr = tf.math.log(tf.math.cosh(lnr))  # Log-cosh activation for classification
+
+        # Parameter prediction (t0, tE, u0)
+        params = tf.keras.layers.Dense(d[3] * self.n, activation="relu")(x)
+        params = tf.keras.layers.Dense(d[3] * self.n, activation="relu")(params)
+        params = tf.keras.layers.Dense(3, activation=None)(params)  # Predict t0, tE, u0
+
+        # Combine outputs
+        classification = tf.keras.layers.Dense(1, activation="sigmoid", name="classification")(lnr)
+        outputs = tf.keras.layers.Concatenate(name="parameters")([classification, params])
+
+        # Build model
+        model = tf.keras.Model(inputs=inputs, outputs=outputs)
+        return model
+        def generate_mock_data(n_samples=1000, window_size=100):
+    """
+     mock data 
+    """
+    X = []
+    y = []
+    params = []  # Store t0, tE, u0 for positive samples
+
+    for _ in range(n_samples):
+        t = np.linspace(0, 1, window_size)
+        flux = 1 + 0.1 * np.random.randn(window_size)
+        if np.random.rand() > 0.5:
+            t0 = np.random.uniform(0.4, 0.6)  # Event peak time
+            tE = np.random.uniform(0.05, 0.2)  # Einstein timescale
+            u0 = np.random.uniform(0.1, 0.5)  # Closest approach distance
+            A = lambda t: (u0**2 + 2) / (u0 * np.sqrt(u0**2 + 4))  # Amplification
+            flux += A(t - t0) - 1  # Add amplification curve
+            y.append(1)
+            params.append([t0, tE, u0])
+        else:
+            # Negative sample (no event)
+            y.append(0)
+            params.append([0, 0, 0])  # No parameters for negative samples
+
+        X.append(flux)
+
+    return np.array(X), np.array(y), np.array(params)
+window_size = 100
+X, y, params = generate_mock_data(n_samples=1000, window_size=window_size)
+
+# Initialize model
+detector = MicrolensingDetection(n_features=window_size)
+model = detector.create_complex_model()
+
+model.compile(
+    optimizer=tf.keras.optimizers.Adam(),
+    loss={
+        "classification": "binary_crossentropy",  # Loss for classification
+        "parameters": "mse",  # Mean squared error for parameter prediction
+    },
+    metrics={
+        "classification": "accuracy",
+        "parameters": "mse",
+    },
+)
+
+history = model.fit(
+    X,
+    {"classification": y, "parameters": params},
+    epochs=20,
+    batch_size=32,
+    validation_split=0.2,
+)
+
+X_test, y_test, params_test = generate_mock_data(n_samples=100, window_size=window_size)
+predictions = model.predict(X_test)
+
+predicted_classes = predictions[:, 0] 
+predicted_params = predictions[:, 1:] 
+
