@@ -1,0 +1,97 @@
+import numpy as np
+import pandas as pd
+
+# Constants for the LMC dynamical center
+alpha_0 = np.radians(78.77)  # Right ascension of the dynamical center (in radians)
+delta_0 = np.radians(-69.01)  # Declination of the dynamical center (in radians)
+
+# Selection criteria constants
+g_max = 19  # Maximum magnitude for star selection
+ruwe_max = 1.4  # Maximum RUWE for astrometric reliability
+parallax_max = 1  # Maximum parallax (in mas)
+parallax_sigma_max = 10  # Parallax signal-to-noise ratio threshold
+
+def select_stars(data):
+    """
+    Select stars based on Gaia EDR3 data criteria.
+
+    Parameters:
+        data (pd.DataFrame): DataFrame containing Gaia data with columns
+                             ['G_mag', 'RUWE', 'parallax', 'parallax_error'].
+
+    Returns:
+        pd.DataFrame: Filtered DataFrame containing selected stars.
+    """
+    mask = (
+        (data['G_mag'] <= g_max) &
+        (data['RUWE'] <= ruwe_max) &
+        (data['parallax'] <= parallax_max) &
+        (data['parallax'] / data['parallax_error'] <= parallax_sigma_max)
+    )
+    return data[mask]
+
+def calculate_positions_and_proper_motions(data):
+    """
+    Calculate x, y positions and proper motions \(\mu_x, \mu_y\) in an orthographic projection.
+
+    Parameters:
+        data (pd.DataFrame): DataFrame containing Gaia data with columns
+                             ['ra', 'dec', 'pmra', 'pmdec'].
+
+    Returns:
+        pd.DataFrame: DataFrame with additional columns ['x', 'y', 'mu_x', 'mu_y'].
+    """
+    ra = np.radians(data['ra'])
+    dec = np.radians(data['dec'])
+    pmra = data['pmra']  # Proper motion in right ascension (mas/yr)
+    pmdec = data['pmdec']  # Proper motion in declination (mas/yr)
+
+    # Calculate x, y positions in orthographic projection
+    x = np.cos(dec) * np.sin(ra - alpha_0)
+    y = np.sin(dec) * np.cos(delta_0) - np.cos(dec) * np.sin(delta_0) * np.cos(ra - alpha_0)
+
+    # Calculate proper motions in orthographic projection
+    mu_x = pmra * np.cos(ra - alpha_0) - pmdec * np.sin(dec) * np.sin(ra - alpha_0)
+    mu_y = pmra * np.sin(delta_0) * np.sin(ra - alpha_0) + pmdec * (
+        np.cos(dec) * np.cos(delta_0) + np.sin(dec) * np.sin(delta_0) * np.cos(ra - alpha_0)
+    )
+
+    data['x'] = x
+    data['y'] = y
+    data['mu_x'] = mu_x
+    data['mu_y'] = mu_y
+
+    return data
+
+def calculate_median_proper_motions(data):
+    """
+    Calculate the median proper motions \(\mu_x, \mu_y\).
+
+    Parameters:
+        data (pd.DataFrame): DataFrame containing proper motion columns ['mu_x', 'mu_y'].
+
+    Returns:
+        tuple: Median proper motions (mu_x_median, mu_y_median).
+    """
+    mu_x_median = np.median(data['mu_x'])
+    mu_y_median = np.median(data['mu_y'])
+
+    return mu_x_median, mu_y_median
+
+# Example usage
+if __name__ == "__main__":
+    # Load Gaia EDR3 data (replace 'gaia_data.csv' with your actual data file)
+    # The data file should contain columns: ['ra', 'dec', 'pmra', 'pmdec', 'G_mag', 'RUWE', 'parallax', 'parallax_error']
+    gaia_data = pd.read_csv('gaia_data.csv')
+
+    # Step 1: Select stars based on criteria
+    selected_stars = select_stars(gaia_data)
+
+    # Step 2: Calculate positions and proper motions
+    processed_data = calculate_positions_and_proper_motions(selected_stars)
+
+    # Step 3: Calculate median proper motions
+    mu_x_median, mu_y_median = calculate_median_proper_motions(processed_data)
+
+    print(f"Median Proper Motion \(\mu_x\): {mu_x_median:.4f} mas/yr")
+    print(f"Median Proper Motion \(\mu_y\): {mu_y_median:.4f} mas/yr")
