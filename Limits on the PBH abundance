@@ -1,0 +1,45 @@
+import numpy as np
+from scipy.interpolate import RegularGridInterpolator
+from emcee import EnsembleSampler
+
+masses = np.logspace(-6, 4, 101)  # 101 points for PBH masses (10^-6 to 10^4 M_sun)
+fs = np.logspace(-4, 1, 101)      # 101 points for f (10^-4 to 10)
+
+# Example: Define a mock N_exp(f=1, M) array for demonstration
+N_exp_f1 = np.array([np.exp(-0.1 * np.log10(mass)) for mass in masses])  # Mock data
+N_exp_grid = np.outer(N_exp_f1, fs)  # N_exp(f, M) = f * N_exp(f=1, M)
+
+
+ln_L_grid = -N_exp_grid  # ln L(f, M) = -N_exp(f, M)
+ln_L_interpolator = RegularGridInterpolator((masses, fs), ln_L_grid)
+
+def ln_likelihood(f, mass):
+    if f < 1e-4 or f > 10:  
+        return -np.inf
+    return ln_L_interpolator((mass, f))
+
+n_walkers = 32  
+n_steps = 1000 
+
+upper_limits = []  # Store the 95% upper limits for each mass
+for mass in masses:
+    initial_state = np.random.uniform(1e-4, 10, size=(n_walkers, 1))
+    sampler = EnsembleSampler(
+        n_walkers, ndim=1, log_prob_fn=lambda f: ln_likelihood(f[0], mass)
+    )
+    
+    sampler.run_mcmc(initial_state, n_steps, progress=True)
+    samples = sampler.get_chain(flat=True)
+    upper_limit = np.percentile(samples, 95)
+    upper_limits.append(upper_limit)
+
+    print(f"Mass {mass:.2e} M_sun: 95% upper limit on f = {upper_limit:.2e}")
+import matplotlib.pyplot as plt
+
+plt.loglog(masses, upper_limits, label="95% Upper Limits")
+plt.xlabel("PBH Mass [$M_\odot$]")
+plt.ylabel("PBH Fraction f")
+plt.title("PBH Abundance Upper Limits")
+plt.legend()
+plt.grid(True, which="both", linestyle="--")
+plt.show()
